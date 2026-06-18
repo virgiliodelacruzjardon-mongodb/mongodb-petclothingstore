@@ -1,0 +1,100 @@
+version: "3.8"
+
+# Full stack for the pet-clothing store: MongoDB 8 (single-node replica set)
+# + Go API + Next.js + seeder.
+#
+# MongoDB runs as a replica set ("rs0") because multi-document TRANSACTIONS
+# (used when creating an order to atomically decrement variant stock) are NOT
+# supported on a standalone mongod.
+#
+# Run everything with Podman:
+#   podman compose up --build        (Podman 4.4+ has native `compose`)
+#   podman-compose up --build        (the python podman-compose wrapper)
+
+services:
+  mongo:
+    image: docker.io/library/mongo:8.0
+    container_name: petstore-mongo
+    restart: unless-stopped
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # One-shot: waits for mongod, then initiates the replica set (idempotent).
+  mongo-init:
+    image: docker.io/library/mongo:8.0
+    container_name: petstore-mongo-init
+    depends_on:
+      - mongo
+    restart: "no"
+    entrypoint:
+      - bash
+      - -c
+      - |
+        echo "waiting for mongod...";
+        until mongosh --host mongo:27017 --quiet --eval 'db.adminCommand("ping")' >/dev/null 2>&1; do
+          sleep 2;
+        done;
+        echo "initiating replica set (if needed)...";
+        mongosh --host mongo:27017 --quiet --eval '
+          try {
+            rs.status();
+            print("replica set already initialized");
+          } catch (e) {
+            rs.initiate({_id: "rs0", members: [{_id: 0, host: "mongo:27017"}]});
+            print("replica set initiated");
+          }
+        ';
+
+  backend:
+    build:
+      context: ./backend
+    container_name: petstore-backend
+    restart: unless-stopped
+    environment:
+      MONGODB_URI: "mongodb://mongo:27017/?replicaSet=rs0"
+      MONGODB_DB: "petstore"
+      JWT_SECRET: "super-secret-change-me-in-prod"
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mongo
+      - mongo-init
+
+  # One-shot job: drops & re-seeds the DB with 200+ docs per collection.
+  seeder:
+    build:
+      context: ./backend
+    container_name: petstore-seeder
+    command: ["/app/seed"]
+    environment:
+      MONGODB_URI: "mongodb://mongo:27017/?replicaSet=rs0"
+      MONGODB_DB: "petstore"
+    depends_on:
+      - mongo
+      - mongo-init
+    restart: "no"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked into the client bundle; points at the host-exposed backend.
+        NEXT_PUBLIC_API_URL: "http://localhost:8080/api"
+    container_name: petstore-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  mongo-data:
