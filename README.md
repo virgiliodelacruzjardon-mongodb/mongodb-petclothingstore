@@ -34,7 +34,13 @@ This builds and starts four things:
 3. `petstore-seeder`  → runs once, drops & seeds the DB, then exits
 4. `petstore-frontend`→ Next.js on `http://localhost:3000`
 
-Open **http://localhost:3000** and log in with the seeded admin:
+Two surfaces:
+- **Storefront** (customers): http://localhost:3000/shop → add to cart → http://localhost:3000/cart → checkout.
+- **Admin CRUD**: http://localhost:3000 (Dashboard, Products, Categories, Customers, Orders, Reviews).
+
+Checkout requires being logged in; the logged-in user is used as the order's
+customer and the order is created through the transactional `POST /orders`
+endpoint (atomic stock decrement). Log in with the seeded admin:
 
 ```
 email:    admin@petstore.dev
@@ -266,7 +272,10 @@ pet-store/
     ├── Dockerfile
     ├── lib/ (api client, types, auth context)
     ├── components/ (Navbar, Modal, Guard)
-    └── app/ (dashboard, login, register, products, categories, customers, orders, reviews)
+    └── app/
+        ├── shop/      # customer storefront (browse + add to cart)
+        ├── cart/      # cart review + checkout (creates an order via POST /orders)
+        └── (admin) dashboard, login, register, products, categories, customers, orders, reviews
 ```
 
 ---

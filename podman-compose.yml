@@ -28,11 +28,11 @@ services:
       retries: 12
 
   # One-shot: waits for mongod, then initiates the replica set (idempotent).
+  # No depends_on: the script below polls mongod until it is reachable, which
+  # avoids fragile dependency graphs when this one-shot container exits.
   mongo-init:
     image: docker.io/library/mongo:8.0
     container_name: petstore-mongo-init
-    depends_on:
-      - mongo
     restart: "no"
     entrypoint:
       - bash
@@ -65,9 +65,8 @@ services:
       PORT: "8080"
     ports:
       - "8080:8080"
-    depends_on:
-      - mongo
-      - mongo-init
+    # No depends_on: the backend retries the Mongo connection on startup
+    # (see internal/db/db.go), so start ordering is not required.
 
   # One-shot job: drops & re-seeds the DB with 200+ docs per collection.
   seeder:
@@ -78,9 +77,7 @@ services:
     environment:
       MONGODB_URI: "mongodb://mongo:27017/?replicaSet=rs0"
       MONGODB_DB: "petstore"
-    depends_on:
-      - mongo
-      - mongo-init
+    # No depends_on: the seeder also retries the Mongo connection on startup.
     restart: "no"
 
   frontend:
@@ -93,8 +90,8 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
-    depends_on:
-      - backend
+    # No depends_on: the browser calls the backend at runtime, so the frontend
+    # container can start in any order relative to the backend.
 
 volumes:
   mongo-data:
